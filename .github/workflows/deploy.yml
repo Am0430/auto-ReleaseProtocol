@@ -14,7 +14,8 @@ jobs:
 
       - name: 安装pandoc（格式转换工具）
         run: sudo apt-get install pandoc
-
+      - name: 列出当前目录文件
+        run: ls -al
       - name: 将Markdown转换为HTML
         run: |
           pandoc source/user_agreement.md -o dist/yunmu13-useragreement.html \
