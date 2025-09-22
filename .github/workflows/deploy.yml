@@ -1,7 +1,15 @@
 name: 部署用户协议到S3
 
-on:push:paths:- 'source/user_agreement.md'  # 只有当源文件更新时触发jobs:deploy:runs-on: ubuntu-latest
-    steps:- name: 拉取代码
+on:
+  push:
+    paths:
+      - 'source/user_agreement.md'  # 只有当源文件更新时触发
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取代码
         uses: actions/checkout@v4
 
       - name: 安装pandoc（格式转换工具）
@@ -11,13 +19,22 @@ on:push:paths:- 'source/user_agreement.md'  # 只有当源文件更新时触发j
         run: |
           pandoc source/user_agreement.md -o dist/yunmu13-useragreement.html \
             --standalone \
-            --metadata title="用户协议"- name: 配置AWS凭证
+            --metadata title="用户协议"
+
+      - name: 配置AWS凭证
         uses: aws-actions/configure-aws-credentials@v4
-        with:aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}aws-region:cn-northwest-1  # 替换为你的S3区域- name: 上传到S3指定路径
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: cn-northwest-1  # 替换为你的S3区域
+
+      - name: 上传到S3指定路径
         run: |
           aws s3 cp dist/yunmu13-useragreement.html \
-            s3://test-autoreleaseprotocol/* \
-            --acl public-read- name: 刷新CloudFront缓存
+            s3://test-autoreleaseprotocol/ \
+            --acl public-read
+
+      - name: 刷新CloudFront缓存
         run: |
           aws cloudfront create-invalidation \
             --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
