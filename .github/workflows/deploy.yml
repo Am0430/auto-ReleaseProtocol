@@ -3,7 +3,7 @@ name: 部署用户协议到S3
 on:
   push:
     paths:
-      - 'source/user_agreement.md'  # 只有当源文件更新时触发
+      - 'source/user_agreement.html'  # 只有当源文件更新时触发
 
 jobs:
   deploy:
@@ -12,25 +12,10 @@ jobs:
       - name: 拉取代码
         uses: actions/checkout@v4
 
-      - name: 安装pandoc（格式转换工具）
-        run: sudo apt-get install pandoc
-      - name: 创建输出目录
-        run: mkdir -p dist
-
-      - name: 生成带时间戳的文件名
+      - name: 覆盖输出目录
         id: generate_filename
         run: |
           echo "html_filename=user_agreement.html" >> $GITHUB_ENV
-
-      - name: 将Markdown转换为HTML
-        run: |
-          pandoc source/user_agreement.md -o dist/${{ env.html_filename }} \
-            --standalone \
-            --metadata title="用户协议" \
-            --css "https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown.min.css" \
-            --metadata pagetitle="用户协议"
-          # 可选：如果需要更精细的样式控制，可在source目录下添加自定义CSS文件，然后引用
-          # 例如：--css "source/custom.css"
 
       - name: 配置AWS凭证
         uses: aws-actions/configure-aws-credentials@v4
@@ -41,7 +26,7 @@ jobs:
 
       - name: 上传到S3指定路径
         run: |
-          aws s3 cp dist/${{ env.html_filename }} \
+          aws s3 cp source/user_agreement.html \
             s3://test-autoreleaseprotocol/mp/${{ env.html_filename }} \
             --acl public-read
 
