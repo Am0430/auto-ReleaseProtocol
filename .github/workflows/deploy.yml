@@ -42,7 +42,7 @@ jobs:
       - name: 上传到S3指定路径
         run: |
           aws s3 cp dist/${{ env.html_filename }} \
-            s3://test-autoreleaseprotocol/mp/${{ evn.html_filename }} \
+            s3://test-autoreleaseprotocol/mp/${{ env.html_filename }} \
             --acl public-read
 
       - name: 刷新CloudFront缓存
