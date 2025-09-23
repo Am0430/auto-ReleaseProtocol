@@ -20,9 +20,7 @@ jobs:
       - name: 生成带时间戳的文件名
         id: generate_filename
         run: |
-          timestamp=$(date +%Y%m%d)
-          echo "timestamp=$timestamp" >> $GITHUB_ENV
-          echo "html_filename=yunmu13-useragreement-${timestamp}.html" >> $GITHUB_ENV
+          echo "html_filename=user_agreement.html" >> $GITHUB_ENV
 
       - name: 将Markdown转换为HTML
         run: |
@@ -44,7 +42,7 @@ jobs:
       - name: 上传到S3指定路径
         run: |
           aws s3 cp dist/${{ env.html_filename }} \
-            s3://test-autoreleaseprotocol/mp/ \
+            s3://test-autoreleaseprotocol/mp/${{ evn.html_filename }} \
             --acl public-read
 
       - name: 刷新CloudFront缓存
