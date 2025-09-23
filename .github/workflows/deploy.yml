@@ -12,7 +12,7 @@ jobs:
       - name: 拉取代码
         uses: actions/checkout@v4
 
-      - name: 覆盖输出目录
+      - name: 生成固定文件名
         id: generate_filename
         run: |
           echo "html_filename=user_agreement.html" >> $GITHUB_ENV
