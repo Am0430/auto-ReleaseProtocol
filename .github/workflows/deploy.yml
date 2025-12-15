@@ -15,9 +15,9 @@ jobs:
       - name: 生成固定文件名和备份文件名（带时间戳）
         id: generate_filename
         run: |
-          # 固定的最新文件名（保持原有逻辑）
+          # 固定的最新文件名
           echo "html_filename=user_agreement.html" >> $GITHUB_ENV
-          # 备份文件名：添加当前时间戳（格式：年-月-日-时-分-秒），确保版本唯一
+          # 备份文件名：添加当前时间戳（格式：年-月-日-时-分-秒），与最新文件同目录
           echo "backup_filename=user_agreement_$(date +%Y-%m-%d-%H-%M-%S).html" >> $GITHUB_ENV
 
       - name: 配置AWS凭证
@@ -27,23 +27,21 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: cn-northwest-1  # 替换为你的S3区域
 
-      - name: 备份S3中现有的协议文件（首次上传时忽略文件不存在的错误）
+      - name: 备份S3中现有的协议文件（同目录，带时间戳，首次上传忽略错误）
         run: |
-          # 复制S3现有文件到mp/backup子目录作为备份，|| true 避免文件不存在时流程失败
+          # 直接复制到mp/目录下，文件名带时间戳，不再使用backup子目录
           aws s3 cp s3://test-autoreleaseprotocol/mp/${{ env.html_filename }} \
-            s3://test-autoreleaseprotocol/mp/backup/${{ env.backup_filename }} \
+            s3://test-autoreleaseprotocol/mp/${{ env.backup_filename }} \
             --acl public-read || true
 
-      - name: 上传最新文件到S3指定路径（覆盖原有文件）
+      - name: 上传最新文件到S3指定路径（覆盖原有固定名文件）
         run: |
-          # 上传到test-autoreleaseprotocol/mp路径
           aws s3 cp source/user_agreement.html \
             s3://test-autoreleaseprotocol/mp/${{ env.html_filename }} \
             --acl public-read
 
       - name: 刷新CloudFront缓存
         run: |
-          # 缓存路径与S3路径匹配：/mp/文件名
           aws cloudfront create-invalidation \
             --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
             --paths "/mp/${{ env.html_filename }}"
