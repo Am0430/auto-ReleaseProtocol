@@ -1,13 +1,9 @@
-name: 部署协议文件到S3
+name: 通用部署多协议到S3
 
 on:
   push:
     paths:
-      - 'source/yunmu13-useragreement.html'  # 只有当源文件更新时触发
-      - 'source/yunmu13-dataprivicyprotocol.html' # 云祭扫隐私协议
-      - 'source/yxt-useragreement.html' # 园信通用户协议
-      - 'source/yxt-dataprivicyprotocol.html' # 园信通隐私协议
-    
+      - 'source/*.html'  # 监听source目录下所有html文件的修改（可根据需要调整）
 
 jobs:
   deploy:
@@ -15,70 +11,65 @@ jobs:
     steps:
       - name: 拉取代码
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-
-      - name: 提取文件（修复文件名映射+备份名逻辑）
-        id: extract_filename
-        run: |
-          # 1. 获取本次修改的本地文件
-          CHANGED_FILES=$(git diff --name-only HEAD^..HEAD | grep '^source/.*\.html$')
-          CHANGED_FILE=$(echo "$CHANGED_FILES" | head -n 1)
-          if [ -z "$CHANGED_FILE" ]; then
-            echo "错误：未找到source下的html文件！"
-            exit 1
-          fi
-          echo "本地修改文件：$CHANGED_FILE"
-
-          # 2. 提取S3目标文件名（与本地文件名完全一致，比如source/yunmu13-dataprivicyprotocol.html → yunmu13-dataprivicyprotocol.html）
-          HTML_FILENAME=$(basename "$CHANGED_FILE")
-          if [ -z "$HTML_FILENAME" ]; then
-            echo "错误：文件名提取失败！"
-            exit 1
-          fi
-          echo "S3目标文件名：$HTML_FILENAME"
-
-          # 3. 生成备份文件名（正确格式：原文件名_时间戳.html，比如yunmu13-dataprivicyprotocol_2025-12-16-15-30.html）
-          BACKUP_FILENAME="${HTML_FILENAME%.html}_$(date +%Y-%m-%d-%H-%M).html"
-          echo "备份文件名：$BACKUP_FILENAME"
-
-          # 写入环境变量
-          echo "local_file=$CHANGED_FILE" >> $GITHUB_ENV
-          echo "s3_target_file=$HTML_FILENAME" >> $GITHUB_ENV
-          echo "s3_backup_file=$BACKUP_FILENAME" >> $GITHUB_ENV
-          echo "cloudfront_path=/mp/agreements/$HTML_FILENAME" >> $GITHUB_ENV
 
       - name: 配置AWS凭证
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: cn-northwest-1
+          aws-region: cn-northwest-1  # 替换为你的S3区域
 
-      - name: 备份S3原始文件（修复：先检查原始文件是否存在，再备份）
+      - name: 定义文件映射表并提取本次修改的文件
+        id: file_mapping
         run: |
-          # 检查S3中原始文件是否存在
-          if aws s3 ls "s3://test-autoreleaseprotocol/mp/${{ env.s3_target_file }}" >/dev/null 2>&1; then
-            # 存在则备份
-            aws s3 cp "s3://test-autoreleaseprotocol/mp/${{ env.s3_target_file }}" \
-              "s3://test-autoreleaseprotocol/mp/backup/${{ env.s3_backup_file }}" \
-              --acl public-read
-            echo "已备份原始文件到backup/${{ env.s3_backup_file }}"
-          else
-            # 不存在则跳过备份（避免生成空文件）
-            echo "S3中原始文件不存在，跳过备份"
-          fi
+          # ********** 核心：维护这个映射表即可，新增文件时在这里添加 **********
+          FILE_MAPPING='{
+            "source/yunmu13-dataprivicyprotocol.html": "yunmu13-datapriviprotocol.html",
+            "source/yunmu13-useragreement.html": "yunmu13-useragreement.html",
+            # 示例：新增的服务协议
+          }'
+          echo "FILE_MAPPING=$FILE_MAPPING" >> $GITHUB_ENV
 
-      - name: 上传文件（覆盖S3原始文件）
-        run: |
-          # 本地文件 → S3目标路径（直接覆盖）
-          aws s3 cp "${{ env.local_file }}" \
-            "s3://test-autoreleaseprotocol/mp/${{ env.s3_target_file }}" \
-            --acl public-read
-          echo "已上传最新文件到S3：${{ env.s3_target_file }}"
+          # 获取本次提交修改的文件列表（相对路径）
+          MODIFIED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
+          echo "MODIFIED_FILES=$MODIFIED_FILES" >> $GITHUB_ENV
 
-      - name: 刷新CloudFront缓存
+          # 筛选出映射表中存在的、且本次被修改的文件，存入数组
+          MODIFIED_TARGET_FILES=$(echo "$MODIFIED_FILES" | grep -f <(echo "$FILE_MAPPING" | jq -r 'keys[]') | tr '\n' ' ')
+          echo "MODIFIED_TARGET_FILES=$MODIFIED_TARGET_FILES" >> $GITHUB_OUTPUT
+
+      - name: 循环处理每个修改的协议文件
+        if: steps.file_mapping.outputs.MODIFIED_TARGET_FILES != ''
         run: |
-          aws cloudfront create-invalidation \
-            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
-            --paths "${{ env.cloudfront_path }}"
+          # 遍历每个被修改的源文件
+          for SOURCE_FILE in ${{ steps.file_mapping.outputs.MODIFIED_TARGET_FILES }}; do
+            echo "开始处理文件：$SOURCE_FILE"
+            
+            # 从映射表中获取对应的S3目标文件名
+            S3_FILENAME=$(echo "$FILE_MAPPING" | jq -r --arg key "$SOURCE_FILE" '.[$key]')
+            if [ -z "$S3_FILENAME" ] || [ "$S3_FILENAME" == "null" ]; then
+              echo "警告：文件$SOURCE_FILE未在映射表中配置，跳过处理"
+              continue
+            fi
+
+            # 生成备份文件名（带时间戳）
+            BACKUP_FILENAME="${S3_FILENAME%.html}_$(date +%Y/%m/%d/%H:%M).html"
+            S3_BUCKET_PATH="s3://test-autoreleaseprotocol/mp/"  # 你的S3桶路径
+
+            # 步骤1：备份S3中现有的协议文件（不存在则忽略错误）
+            echo "备份旧文件：$S3_BUCKET_PATH/$S3_FILENAME → $S3_BUCKET_PATH/backup/$BACKUP_FILENAME"
+            aws s3 cp "$S3_BUCKET_PATH/$S3_FILENAME" "$S3_BUCKET_PATH/backup/$BACKUP_FILENAME" --acl public-read || true
+
+            # 步骤2：上传最新文件到S3指定路径
+            echo "上传新文件：$SOURCE_FILE → $S3_BUCKET_PATH/$S3_FILENAME"
+            aws s3 cp "$SOURCE_FILE" "$S3_BUCKET_PATH/$S3_FILENAME" --acl public-read
+
+            # 步骤3：刷新CloudFront缓存
+            echo "刷新CloudFront缓存：/mp/agreements/$S3_FILENAME"
+            aws cloudfront create-invalidation \
+              --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
+              --paths "/mp/agreements/$S3_FILENAME"
+            
+            echo "文件$SOURCE_FILE处理完成"
+            echo "-------------------------"
+          done
