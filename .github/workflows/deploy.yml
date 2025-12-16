@@ -16,71 +16,69 @@ jobs:
       - name: 拉取代码
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2  # 拉取最近两次提交，用于git diff
+          fetch-depth: 2
 
-      - name: 提取触发文件的文件名（修复：用git diff获取修改的文件，增加校验）
+      - name: 提取文件（修复文件名映射+备份名逻辑）
         id: extract_filename
         run: |
-          # 用git diff获取本次push修改的文件（更可靠，不受event上下文影响）
-          # --name-only：只显示文件名；HEAD^..HEAD：对比上一次提交和当前提交
+          # 1. 获取本次修改的本地文件
           CHANGED_FILES=$(git diff --name-only HEAD^..HEAD | grep '^source/.*\.html$')
-          # 取第一个符合条件的文件
           CHANGED_FILE=$(echo "$CHANGED_FILES" | head -n 1)
-
-          # 校验：如果没有找到修改的文件，直接退出并报错
           if [ -z "$CHANGED_FILE" ]; then
-            echo "错误：未找到修改的source目录下的html文件！"
+            echo "错误：未找到source下的html文件！"
             exit 1
           fi
+          echo "本地修改文件：$CHANGED_FILE"
 
-          echo "触发文件路径：$CHANGED_FILE"
-          # 提取原始文件名（去掉source/前缀，保持和S3文件名一致）
+          # 2. 提取S3目标文件名（与本地文件名完全一致，比如source/yunmu13-dataprivicyprotocol.html → yunmu13-dataprivicyprotocol.html）
           HTML_FILENAME=$(basename "$CHANGED_FILE")
-          # 生成备份文件名（带时间戳）
-          BACKUP_FILENAME="${HTML_FILENAME%.html}_$(date +%Y/%m/%d/%H:%M).html"
+          if [ -z "$HTML_FILENAME" ]; then
+            echo "错误：文件名提取失败！"
+            exit 1
+          fi
+          echo "S3目标文件名：$HTML_FILENAME"
+
+          # 3. 生成备份文件名（正确格式：原文件名_时间戳.html，比如yunmu13-dataprivicyprotocol_2025-12-16-15-30.html）
+          BACKUP_FILENAME="${HTML_FILENAME%.html}_$(date +%Y-%m-%d-%H-%M).html"
+          echo "备份文件名：$BACKUP_FILENAME"
 
           # 写入环境变量
-          echo "html_filename=$HTML_FILENAME" >> $GITHUB_ENV
-          echo "backup_filename=$BACKUP_FILENAME" >> $GITHUB_ENV
-          echo "file_path_in_cloudfront=/mp/$HTML_FILENAME" >> $GITHUB_ENV
-          # 把触发文件路径也写入环境变量，避免后续引用空值
-          echo "local_file_path=$CHANGED_FILE" >> $GITHUB_ENV
+          echo "local_file=$CHANGED_FILE" >> $GITHUB_ENV
+          echo "s3_target_file=$HTML_FILENAME" >> $GITHUB_ENV
+          echo "s3_backup_file=$BACKUP_FILENAME" >> $GITHUB_ENV
+          echo "cloudfront_path=/mp/agreements/$HTML_FILENAME" >> $GITHUB_ENV
 
       - name: 配置AWS凭证
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: cn-northwest-1  # 确认是你的S3区域
+          aws-region: cn-northwest-1
 
-      - name: 备份S3中现有协议文件（增加非空校验）
+      - name: 备份S3原始文件（修复：先检查原始文件是否存在，再备份）
         run: |
-          # 校验环境变量是否为空
-          if [ -z "${{ env.html_filename }}" ] || [ -z "${{ env.backup_filename }}" ]; then
-            echo "错误：文件名参数为空！"
-            exit 1
+          # 检查S3中原始文件是否存在
+          if aws s3 ls "s3://test-autoreleaseprotocol/mp/${{ env.s3_target_file }}" >/dev/null 2>&1; then
+            # 存在则备份
+            aws s3 cp "s3://test-autoreleaseprotocol/mp/${{ env.s3_target_file }}" \
+              "s3://test-autoreleaseprotocol/mp/backup/${{ env.s3_backup_file }}" \
+              --acl public-read
+            echo "已备份原始文件到backup/${{ env.s3_backup_file }}"
+          else
+            # 不存在则跳过备份（避免生成空文件）
+            echo "S3中原始文件不存在，跳过备份"
           fi
-          # 备份文件，失败时忽略（比如文件不存在）
-          aws s3 cp s3://test-autoreleaseprotocol/mp/${{ env.html_filename }} \
-            s3://test-autoreleaseprotocol/mp/backup${{ env.backup_filename }} \
-            --acl public-read || true
 
-      - name: 上传最新协议文件到S3（使用环境变量中的本地文件路径）
+      - name: 上传文件（覆盖S3原始文件）
         run: |
-          if [ -z "${{ env.local_file_path }}" ] || [ -z "${{ env.html_filename }}" ]; then
-            echo "错误：文件路径参数为空！"
-            exit 1
-          fi
-          aws s3 cp ${{ env.local_file_path }} \
-            s3://test-autoreleaseprotocol/mp/${{ env.html_filename }} \
+          # 本地文件 → S3目标路径（直接覆盖）
+          aws s3 cp "${{ env.local_file }}" \
+            "s3://test-autoreleaseprotocol/mp/${{ env.s3_target_file }}" \
             --acl public-read
+          echo "已上传最新文件到S3：${{ env.s3_target_file }}"
 
       - name: 刷新CloudFront缓存
         run: |
-          if [ -z "${{ env.file_path_in_cloudfront }}" ]; then
-            echo "错误：CloudFront路径参数为空！"
-            exit 1
-          fi
           aws cloudfront create-invalidation \
             --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
-            --paths "${{ env.file_path_in_cloudfront }}"
+            --paths "${{ env.cloudfront_path }}"
