@@ -24,7 +24,7 @@ jobs:
           BACKUP_FILENAME="${HTML_FILENAME%.html}_$(date +%Y-%m-%d-%H-%M).html"
           echo "html_filename=$HTML_FILENAME" >> $GITHUB_ENV
           echo "backup_filename=$BACKUP_FILENAME" >> $GITHUB_ENV
-          echo "file_path_in_cloudfront=/mp/agreements/$HTML_FILENAME" >> $GITHUB_ENV
+          echo "file_path_in_cloudfront=/mp/$HTML_FILENAME" >> $GITHUB_ENV
 
       - name: 配置AWS凭证
         uses: aws-actions/configure-aws-credentials@v4
@@ -36,14 +36,14 @@ jobs:
       - name: 备份S3中现有的协议文件
         run: |
           # 直接复制到mp/目录下，文件名带时间戳
-          aws s3 cp s3://test-autoreleaseprotocol/mp/agreements/${{ env.html_filename }} \
-            s3://test-autoreleaseprotocol/mp/agreements/backup/${{ env.backup_filename }} \
+          aws s3 cp s3://test-autoreleaseprotocol/mp/${{ env.html_filename }} \
+            s3://test-autoreleaseprotocol/mp/backup/${{ env.backup_filename }} \
             --acl public-read || true
 
       - name: 上传最新文件到S3指定路径
         run: |
           aws s3 cp ${{ github.event.head_commit.modified[0] }} \
-            s3://test-autoreleaseprotocol/mp/agreements/${{ env.html_filename }} \
+            s3://test-autoreleaseprotocol/mp/${{ env.html_filename }} \
             --acl public-read
 
       - name: 刷新CloudFront缓存
