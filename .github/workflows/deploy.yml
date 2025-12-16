@@ -25,17 +25,24 @@ jobs:
           # ********** 核心：维护这个映射表即可，新增文件时在这里添加 **********
           FILE_MAPPING='{
             "source/yunmu13-dataprivicyprotocol.html": "yunmu13-datapriviprotocol.html",
-            "source/yunmu13-useragreement.html": "yunmu13-useragreement.html",
-            # 示例：新增的服务协议
+            "source/yunmu13-useragreement.html": "yunmu13-useragreement.html"
           }'
           echo "FILE_MAPPING=$FILE_MAPPING" >> $GITHUB_ENV
 
           # 获取本次提交修改的文件列表（相对路径）
-          MODIFIED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
+          if [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
+            # 首次提交，获取source目录下所有html文件
+            MODIFIED_FILES=$(git ls-files source/*.html)
+          else
+            # 非首次提交，获取本次修改的文件列表
+            MODIFIED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
+          fi
           echo "MODIFIED_FILES=$MODIFIED_FILES" >> $GITHUB_ENV
 
-          # 筛选出映射表中存在的、且本次被修改的文件，存入数组
-          MODIFIED_TARGET_FILES=$(echo "$MODIFIED_FILES" | grep -f <(echo "$FILE_MAPPING" | jq -r 'keys[]') | tr '\n' ' ')
+          # 筛选出映射表中存在的、且本次被修改的文件
+          # 先获取映射表中的所有源文件路径，再匹配修改的文件
+          SOURCE_KEYS=$(echo "$FILE_MAPPING" | jq -r 'keys[]')
+          MODIFIED_TARGET_FILES=$(echo "$MODIFIED_FILES" | grep -xFf <(echo "$SOURCE_KEYS") | tr '\n' ' ')
           echo "MODIFIED_TARGET_FILES=$MODIFIED_TARGET_FILES" >> $GITHUB_OUTPUT
 
       - name: 循环处理每个修改的协议文件
