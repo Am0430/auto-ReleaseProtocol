@@ -1,4 +1,4 @@
-name: 部署用户协议到S3
+name: 部署协议文件到S3
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
       - 'source/yunmu13-dataprivicyprotocol.html' # 云祭扫隐私协议
       - 'source/yxt-useragreement.html' # 园信通用户协议
       - 'source/yxt-dataprivicyprotocol.html' # 园信通隐私协议
+    
 
 jobs:
   deploy:
@@ -14,40 +15,72 @@ jobs:
     steps:
       - name: 拉取代码
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # 拉取最近两次提交，用于git diff
 
-      - name: 生成固定文件名和备份文件名（带时间戳）
+      - name: 提取触发文件的文件名（修复：用git diff获取修改的文件，增加校验）
         id: extract_filename
         run: |
-          # 固定的最新文件名
-          CHANGED_FILE="${{ github.event.head_commit.modified[0] }}"
+          # 用git diff获取本次push修改的文件（更可靠，不受event上下文影响）
+          # --name-only：只显示文件名；HEAD^..HEAD：对比上一次提交和当前提交
+          CHANGED_FILES=$(git diff --name-only HEAD^..HEAD | grep '^source/.*\.html$')
+          # 取第一个符合条件的文件
+          CHANGED_FILE=$(echo "$CHANGED_FILES" | head -n 1)
+
+          # 校验：如果没有找到修改的文件，直接退出并报错
+          if [ -z "$CHANGED_FILE" ]; then
+            echo "错误：未找到修改的source目录下的html文件！"
+            exit 1
+          fi
+
+          echo "触发文件路径：$CHANGED_FILE"
+          # 提取原始文件名（去掉source/前缀，保持和S3文件名一致）
           HTML_FILENAME=$(basename "$CHANGED_FILE")
-          BACKUP_FILENAME="${HTML_FILENAME%.html}_$(date +%Y-%m-%d-%H-%M).html"
+          # 生成备份文件名（带时间戳）
+          BACKUP_FILENAME="${HTML_FILENAME%.html}_$(date +%Y/%m/%d/%H:%M).html"
+
+          # 写入环境变量
           echo "html_filename=$HTML_FILENAME" >> $GITHUB_ENV
           echo "backup_filename=$BACKUP_FILENAME" >> $GITHUB_ENV
           echo "file_path_in_cloudfront=/mp/$HTML_FILENAME" >> $GITHUB_ENV
+          # 把触发文件路径也写入环境变量，避免后续引用空值
+          echo "local_file_path=$CHANGED_FILE" >> $GITHUB_ENV
 
       - name: 配置AWS凭证
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: cn-northwest-1  # 替换为你的S3区域
+          aws-region: cn-northwest-1  # 确认是你的S3区域
 
-      - name: 备份S3中现有的协议文件
+      - name: 备份S3中现有协议文件（增加非空校验）
         run: |
-          # 直接复制到mp/目录下，文件名带时间戳
+          # 校验环境变量是否为空
+          if [ -z "${{ env.html_filename }}" ] || [ -z "${{ env.backup_filename }}" ]; then
+            echo "错误：文件名参数为空！"
+            exit 1
+          fi
+          # 备份文件，失败时忽略（比如文件不存在）
           aws s3 cp s3://test-autoreleaseprotocol/mp/${{ env.html_filename }} \
-            s3://test-autoreleaseprotocol/mp/backup/${{ env.backup_filename }} \
+            s3://test-autoreleaseprotocol/mp/backup${{ env.backup_filename }} \
             --acl public-read || true
 
-      - name: 上传最新文件到S3指定路径
+      - name: 上传最新协议文件到S3（使用环境变量中的本地文件路径）
         run: |
-          aws s3 cp ${{ github.event.head_commit.modified[0] }} \
+          if [ -z "${{ env.local_file_path }}" ] || [ -z "${{ env.html_filename }}" ]; then
+            echo "错误：文件路径参数为空！"
+            exit 1
+          fi
+          aws s3 cp ${{ env.local_file_path }} \
             s3://test-autoreleaseprotocol/mp/${{ env.html_filename }} \
             --acl public-read
 
       - name: 刷新CloudFront缓存
         run: |
+          if [ -z "${{ env.file_path_in_cloudfront }}" ]; then
+            echo "错误：CloudFront路径参数为空！"
+            exit 1
+          fi
           aws cloudfront create-invalidation \
             --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
-            --paths "/mp/${{ env.html_filename }}"
+            --paths "${{ env.file_path_in_cloudfront }}"
