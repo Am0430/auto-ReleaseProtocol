@@ -30,17 +30,16 @@ jobs:
           echo "FILE_MAPPING=$FILE_MAPPING" >> $GITHUB_ENV
 
           # 获取本次提交修改的文件列表（相对路径）
-          if [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
-            # 首次提交，获取source目录下所有html文件
-            MODIFIED_FILES=$(git ls-files source/*.html)
+          if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+            # 有上一个提交，用HEAD^对比
+            MODIFIED_FILES=$(git diff --name-only HEAD^ HEAD)
           else
-            # 非首次提交，获取本次修改的文件列表
-            MODIFIED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
+            # 没有上一个提交（首次提交），获取所有文件
+            MODIFIED_FILES=$(git ls-files source/*.html)
           fi
           echo "MODIFIED_FILES=$MODIFIED_FILES" >> $GITHUB_ENV
 
-          # 筛选出映射表中存在的、且本次被修改的文件
-          # 先获取映射表中的所有源文件路径，再匹配修改的文件
+          # 筛选映射表中的文件
           SOURCE_KEYS=$(echo "$FILE_MAPPING" | jq -r 'keys[]')
           MODIFIED_TARGET_FILES=$(echo "$MODIFIED_FILES" | grep -xFf <(echo "$SOURCE_KEYS") | tr '\n' ' ')
           echo "MODIFIED_TARGET_FILES=$MODIFIED_TARGET_FILES" >> $GITHUB_OUTPUT
@@ -60,7 +59,7 @@ jobs:
             fi
 
             # 生成备份文件名（带时间戳）
-            BACKUP_FILENAME="${S3_FILENAME%.html}_$(date +%Y/%m/%d/%H:%M).html"
+            BACKUP_FILENAME="${S3_FILENAME%.html}_$(date +%Y-%m-%d-%H-%M).html"
             S3_BUCKET_PATH="s3://test-autoreleaseprotocol/mp/"  # 你的S3桶路径
 
             # 步骤1：备份S3中现有的协议文件（不存在则忽略错误）
@@ -72,10 +71,10 @@ jobs:
             aws s3 cp "$SOURCE_FILE" "$S3_BUCKET_PATH/$S3_FILENAME" --acl public-read
 
             # 步骤3：刷新CloudFront缓存
-            echo "刷新CloudFront缓存：/mp/agreements/$S3_FILENAME"
+            echo "刷新CloudFront缓存：/mp/$S3_FILENAME"
             aws cloudfront create-invalidation \
               --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
-              --paths "/mp/agreements/$S3_FILENAME"
+              --paths "/mp/$S3_FILENAME"
             
             echo "文件$SOURCE_FILE处理完成"
             echo "-------------------------"
