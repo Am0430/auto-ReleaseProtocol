@@ -23,7 +23,10 @@ jobs:
         id: file_mapping
         run: |
           # ********** 核心：维护这个映射表即可，新增文件时在这里添加 **********
-          FILE_MAPPING='{"source/yunmu13-dataprivicyprotocol.html": "yunmu13-datapriviprotocol.html","source/yunmu13-useragreement.html": "yunmu13-useragreement.html"}'
+          declare -A FILE_MAPPING=(
+            ["source/yunmu13-dataprivicyprotocol.html"]="yunmu13-datapriviprotocol.html"
+            ["source/yunmu13-useragreement.html"]="yunmu13-useragreement.html"
+          )
           echo "FILE_MAPPING=$FILE_MAPPING" >> $GITHUB_ENV
 
           # 获取本次提交修改的文件列表（相对路径）
