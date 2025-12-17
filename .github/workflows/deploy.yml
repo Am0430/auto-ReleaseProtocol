@@ -19,6 +19,8 @@ jobs:
     steps:
       - name: 拉取代码
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: 判断当前变更是否包含该文件
         id: check
