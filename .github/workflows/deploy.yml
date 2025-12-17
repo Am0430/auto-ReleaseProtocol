@@ -32,9 +32,11 @@ jobs:
           fi
 
       - name: 生成文件名
-        if: steps.check.outputs.changed == 'true'
+
         run: |
-          echo "html_filename=${{ matrix.file.target }}" >> $GITHUB_ENV
+          filename="$(basename '${{ matrix.file.source }}')"
+          base_name="${filename%.html}"
+          echo "html_filename=${filename}" >> $GITHUB_ENV
           echo "backup_filename=${base_name}_$(date +%Y-%m-%d-%H-%M).html" >> $GITHUB_ENV
 
       - name: 配置AWS凭证
